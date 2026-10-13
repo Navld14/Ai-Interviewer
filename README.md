@@ -3,9 +3,11 @@
 Practice technical and behavioral interviews with an AI that actually evaluates your answers — scores them, gives detailed feedback, and generates a full hiring report at the end.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue?style=flat-square&logo=python)
-![Claude](https://img.shields.io/badge/Claude-API-orange?style=flat-square)
+![Gemini](https://img.shields.io/badge/Google-Gemini_API-4285F4?style=flat-square&logo=google)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.35-red?style=flat-square&logo=streamlit)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+
+🌐 **Live Demo:** [Try it here](https://ai-interviewer-00.streamlit.app/)
 
 ---
 
@@ -25,7 +27,7 @@ Practice technical and behavioral interviews with an AI that actually evaluates 
 | Tool | Purpose |
 |------|---------|
 | Python | Core language |
-| Claude API (Anthropic) | Question generation + answer evaluation |
+| Google Gemini API | Question generation + answer evaluation (free tier) |
 | Streamlit | Web app + session state management |
 
 ---
@@ -34,8 +36,8 @@ Practice technical and behavioral interviews with an AI that actually evaluates 
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/Navld14/ai-interviewer.git
-cd ai-interviewer
+git clone https://github.com/Navld14/Ai-Interviewer.git
+cd Ai-Interviewer
 ```
 
 ### 2. Install dependencies
@@ -43,14 +45,17 @@ cd ai-interviewer
 pip install -r requirements.txt
 ```
 
-### 3. Set your API key
+### 3. Get a free Gemini API key
+- Go to [aistudio.google.com](https://aistudio.google.com)
+- Click **Get API Key → Create API key**
+- It's completely free
+
+### 4. Set your API key
 ```bash
-export ANTHROPIC_API_KEY=your_key_here
+export GEMINI_API_KEY="AIzaSy..."
 ```
 
-Get your free API key at [console.anthropic.com](https://console.anthropic.com)
-
-### 4. Run the app
+### 5. Run the app
 ```bash
 streamlit run app.py
 ```
@@ -76,15 +81,15 @@ streamlit run app.py
 ```
 User selects role + level
         ↓
-Claude generates question (avoids repeats, scales difficulty)
+Gemini generates question (avoids repeats, scales difficulty)
         ↓
 User types answer
         ↓
-Claude evaluates: score 1-10, verdict, strength, improvement
+Gemini evaluates: score 1-10, verdict, strength, improvement
         ↓
 Repeat for 5 questions
         ↓
-Claude generates final hiring report
+Gemini generates final hiring report
 ```
 
 ---
@@ -92,12 +97,10 @@ Claude generates final hiring report
 ## 📁 Project Structure
 
 ```
-ai-interviewer/
+Ai-Interviewer/
 │
 ├── app.py              # Main Streamlit application
 ├── requirements.txt    # Python dependencies
-├── .env.example        # Environment variable template
-├── .gitignore
 └── README.md
 ```
 
