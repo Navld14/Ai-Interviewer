@@ -1,7 +1,7 @@
 import streamlit as st
-import anthropic
+import os
 import json
-import time
+from google import genai
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -9,6 +9,14 @@ st.set_page_config(
     page_icon="💼",
     layout="centered"
 )
+
+# ── Gemini client ──────────────────────────────────────────────────────────────
+api_key = os.environ.get("GEMINI_API_KEY", "")
+if not api_key:
+    st.error("GEMINI_API_KEY is not set in Streamlit secrets!")
+    st.stop()
+
+client = genai.Client(api_key=api_key)
 
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -60,14 +68,6 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     padding: 20px;
     margin: 12px 0;
 }
-.feedback-label {
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: #22c55e;
-    margin-bottom: 8px;
-}
 
 .score-pill {
     display: inline-block;
@@ -99,14 +99,6 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     border-radius: 999px;
     background: linear-gradient(90deg, #6366f1, #8b5cf6);
 }
-
-.report-item {
-    background: #111;
-    border: 1px solid #1e1e1e;
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 10px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -129,11 +121,26 @@ LEVELS = {
 
 TOTAL_QUESTIONS = 5
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def get_question(role, level, asked_questions, question_num):
-    client = anthropic.Anthropic()
-    asked = "\n".join([f"- {q}" for q in asked_questions]) if asked_questions else "None yet"
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def call_gemini(prompt: str) -> str:
+    response = client.models.generate_content(
+        model="gemini-3.5-flash-lite",
+        contents=prompt
+    )
+    return response.text.strip()
+
+
+def parse_json(raw: str) -> dict:
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return json.loads(raw.strip())
+
+
+def get_question(role, level, asked_questions, question_num):
+    asked = "\n".join([f"- {q}" for q in asked_questions]) if asked_questions else "None yet"
     prompt = f"""You are a strict but fair technical interviewer at a top tech company.
 
 Role: {role}
@@ -142,23 +149,15 @@ Question number: {question_num} of {TOTAL_QUESTIONS}
 Questions already asked:
 {asked}
 
-Generate ONE interview question. Mix technical and behavioral questions across the interview.
-Early questions (1-2) should be easier, later ones (4-5) harder.
-Do NOT repeat similar questions to ones already asked.
+Generate ONE interview question. Mix technical and behavioral questions.
+Early questions (1-2) easier, later ones (4-5) harder.
+Do NOT repeat similar questions.
 
-Respond with ONLY the question text. No preamble, no numbering, no explanation."""
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=200,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.content[0].text.strip()
+Respond with ONLY the question text. No preamble, no numbering."""
+    return call_gemini(prompt)
 
 
 def evaluate_answer(role, level, question, answer):
-    client = anthropic.Anthropic()
-
     prompt = f"""You are a strict but fair technical interviewer evaluating a candidate's answer.
 
 Role: {role}
@@ -166,37 +165,23 @@ Level: {level}
 Question: {question}
 Candidate's Answer: {answer}
 
-Evaluate the answer and respond ONLY with valid JSON (no markdown, no preamble):
+Evaluate and respond ONLY with valid JSON (no markdown):
 {{
   "score": <integer 1-10>,
-  "verdict": "<one of: Excellent | Good | Average | Below Average | Poor>",
+  "verdict": "<Excellent | Good | Average | Below Average | Poor>",
   "strength": "<one specific thing they did well in 1 sentence>",
-  "improvement": "<one specific thing they should improve in 1 sentence>",
+  "improvement": "<one specific thing to improve in 1 sentence>",
   "ideal_points": "<2-3 key points a strong answer would include, comma separated>"
 }}"""
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    return parse_json(call_gemini(prompt))
 
 
 def generate_final_report(role, level, qa_pairs):
-    client = anthropic.Anthropic()
-
     qa_text = "\n\n".join([
         f"Q{i+1}: {qa['question']}\nA: {qa['answer']}\nScore: {qa['score']}/10"
         for i, qa in enumerate(qa_pairs)
     ])
-
-    prompt = f"""You are a senior interviewer writing a final assessment report.
+    prompt = f"""You are a senior interviewer writing a final assessment.
 
 Role: {role}
 Level: {level}
@@ -204,28 +189,17 @@ Level: {level}
 Interview transcript:
 {qa_text}
 
-Write a final report as JSON (no markdown, no preamble):
+Respond ONLY with valid JSON (no markdown):
 {{
   "overall_score": <integer 1-100>,
-  "verdict": "<one of: Strong Hire | Hire | Maybe | No Hire | Strong No Hire>",
-  "verdict_color": "<one of: #22c55e | #86efac | #f59e0b | #ef4444 | #991b1b>",
-  "summary": "<2-3 sentence overall assessment of the candidate>",
-  "top_strength": "<their biggest strength observed across the interview>",
-  "top_weakness": "<their biggest area for improvement>",
-  "recommendation": "<specific advice for this candidate going forward in 1-2 sentences>"
+  "verdict": "<Strong Hire | Hire | Maybe | No Hire | Strong No Hire>",
+  "verdict_color": "<#22c55e | #86efac | #f59e0b | #ef4444 | #991b1b>",
+  "summary": "<2-3 sentence overall assessment>",
+  "top_strength": "<biggest strength observed>",
+  "top_weakness": "<biggest area for improvement>",
+  "recommendation": "<specific advice for this candidate in 1-2 sentences>"
 }}"""
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=500,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    return parse_json(call_gemini(prompt))
 
 
 def score_color(score):
@@ -237,7 +211,7 @@ def score_color(score):
 # ── Session init ───────────────────────────────────────────────────────────────
 def init():
     defaults = {
-        "stage": "setup",       # setup | interview | feedback | report
+        "stage": "setup",
         "role": None,
         "level": None,
         "question_num": 0,
@@ -290,7 +264,6 @@ if st.session_state.stage == "setup":
 # STAGE 2 — Interview
 # ════════════════════════════════════════════════════════════════════════════════
 elif st.session_state.stage == "interview":
-    # Progress
     progress = (st.session_state.question_num - 1) / TOTAL_QUESTIONS
     st.markdown(f"**Question {st.session_state.question_num} of {TOTAL_QUESTIONS}** — {st.session_state.role} · {st.session_state.level.title()}")
     st.markdown(f"""
@@ -299,7 +272,6 @@ elif st.session_state.stage == "interview":
     </div>
     """, unsafe_allow_html=True)
 
-    # Question
     st.markdown(f"""
     <div class='question-card'>
         <div class='question-label'>🎤 Interviewer</div>
@@ -307,7 +279,6 @@ elif st.session_state.stage == "interview":
     </div>
     """, unsafe_allow_html=True)
 
-    # Answer input
     answer = st.text_area(
         "Your Answer",
         placeholder="Type your answer here... be thorough, use examples where possible.",
@@ -350,7 +321,6 @@ elif st.session_state.stage == "feedback":
 
     st.markdown(f"**Question {st.session_state.question_num} of {TOTAL_QUESTIONS}** · Feedback")
 
-    # Question recap
     st.markdown(f"""
     <div class='question-card'>
         <div class='question-label'>Question</div>
@@ -358,23 +328,21 @@ elif st.session_state.stage == "feedback":
     </div>
     """, unsafe_allow_html=True)
 
-    # Score
     color = score_color(fb['score'])
     st.markdown(f"""
     <div class='feedback-card'>
-        <div class='feedback-label'>📊 Evaluation</div>
+        <div style='font-size:0.7rem; color:#22c55e; letter-spacing:2px; text-transform:uppercase; margin-bottom:8px'>📊 Evaluation</div>
         <span class='score-pill' style='background:{color}22; color:{color}; border:1px solid {color}44'>
             {fb['score']}/10 — {fb['verdict']}
         </span>
         <div style='margin-top:12px'>
             <div style='color:#86efac; font-size:0.85rem; margin-bottom:6px'>✅ <b>Strength:</b> {fb['strength']}</div>
             <div style='color:#fca5a5; font-size:0.85rem; margin-bottom:6px'>⚠️ <b>Improve:</b> {fb['improvement']}</div>
-            <div style='color:#94a3b8; font-size:0.85rem'>💡 <b>Key points to cover:</b> {fb['ideal_points']}</div>
+            <div style='color:#94a3b8; font-size:0.85rem'>💡 <b>Key points:</b> {fb['ideal_points']}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Next
     is_last = st.session_state.question_num >= TOTAL_QUESTIONS
 
     if st.button(
@@ -417,7 +385,6 @@ elif st.session_state.stage == "report":
 
     st.markdown("### 📋 Interview Complete — Final Report")
 
-    # Overall
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown(f"""<div class='stat-box'>
@@ -427,17 +394,16 @@ elif st.session_state.stage == "report":
     with c2:
         st.markdown(f"""<div class='stat-box'>
             <div class='stat-value' style='color:{report["verdict_color"]}'>{avg_score:.1f}</div>
-            <div class='stat-label'>Avg Answer Score /10</div>
+            <div class='stat-label'>Avg Answer /10</div>
         </div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""<div class='stat-box'>
             <div class='stat-value' style='color:{report["verdict_color"]}; font-size:1rem; padding-top:8px'>{report['verdict']}</div>
-            <div class='stat-label'>Hiring Verdict</div>
+            <div class='stat-label'>Verdict</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # Summary
     st.markdown(f"""
     <div style='background:#111; border:1px solid #222; border-radius:14px; padding:20px; margin-bottom:16px'>
         <div style='font-size:0.7rem; color:#555; letter-spacing:2px; text-transform:uppercase; margin-bottom:10px'>Assessment</div>
@@ -450,7 +416,6 @@ elif st.session_state.stage == "report":
     </div>
     """, unsafe_allow_html=True)
 
-    # Per-question breakdown
     st.markdown("#### 📊 Question Breakdown")
     for i, qa in enumerate(st.session_state.qa_pairs):
         color = score_color(qa['score'])
@@ -467,4 +432,4 @@ elif st.session_state.stage == "report":
         st.rerun()
 
 st.markdown("---")
-st.markdown("<p style='text-align:center; color:#333; font-size:0.8rem'>Built with Python · Claude API · Streamlit</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:#333; font-size:0.8rem'>Built with Python · Google Gemini · Streamlit</p>", unsafe_allow_html=True)
